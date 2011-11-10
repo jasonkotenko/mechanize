@@ -2,6 +2,7 @@ from cStringIO import StringIO
 
 import _response
 import _urllib2_fork
+from urllib import addinfourl
 
 
 # GzipConsumer was taken from Fredrik Lundh's effbot.org-0.1-20041009 library
@@ -61,31 +62,22 @@ class GzipConsumer:
 # --------------------------------------------------------------------
 
 # the rest of this module is John Lee's stupid code, not
-# Fredrik's nice code :-)
+# Fredrik's nice code :-) (later changed by Jason Kotenko)
 
 class stupid_gzip_consumer:
     def __init__(self): self.data = []
     def feed(self, data): self.data.append(data)
 
-class stupid_gzip_wrapper(_response.closeable_response):
+class stupid_gzip_wrapper(addinfourl):
     def __init__(self, response):
-        self._response = response
-
-        c = stupid_gzip_consumer()
-        gzc = GzipConsumer(c)
+        cc = stupid_gzip_consumer()
+        gzc = GzipConsumer(cc)
         gzc.feed(response.read())
-        self.__data = StringIO("".join(c.data))
+        self.__data = StringIO("".join(cc.data))
+        self.msg = response.msg
+        addinfourl.__init__(self, self.__data, response.headers,
+                            response.url, response.code)
 
-    def read(self, size=-1):
-        return self.__data.read(size)
-    def readline(self, size=-1):
-        return self.__data.readline(size)
-    def readlines(self, sizehint=-1):
-        return self.__data.readlines(sizehint)
-
-    def __getattr__(self, name):
-        # delegate unknown methods/attributes
-        return getattr(self._response, name)
 
 class HTTPGzipProcessor(_urllib2_fork.BaseHandler):
     handler_order = 200  # response processing before HTTPEquivProcessor
@@ -96,9 +88,10 @@ class HTTPGzipProcessor(_urllib2_fork.BaseHandler):
 
     def http_response(self, request, response):
         # post-process response
-        enc_hdrs = response.info().getheaders("Content-encoding")
+        enc_hdrs = response.info().getheaders("content-encoding")
         for enc_hdr in enc_hdrs:
             if ("gzip" in enc_hdr) or ("compress" in enc_hdr):
+                del response.headers['content-encoding']
                 return stupid_gzip_wrapper(response)
         return response
 
